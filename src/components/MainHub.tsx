@@ -10,11 +10,11 @@ import {
   BrainCircuit, 
   Languages, 
   Target,
-  ShieldHalf,
   ChevronRight,
-  Maximize,
-  Minimize,
-  Focus
+  Calendar,
+  MessageCircle,
+  Music2,
+  Camera,
 } from 'lucide-react';
 
 export const MODULES = [
@@ -28,6 +28,13 @@ export const MODULES = [
   { id: 'doctrine', label: 'Vida Castrense', icon: Shield, desc: 'Reglamento y doctrina operativa' },
   { id: 'admin', label: 'Gestión', icon: FileText, desc: 'Control de admisión y trámites' },
   { id: 'languages', label: 'Inglés', icon: Languages, desc: 'Competencia lingüística institucional' },
+];
+
+const TOP_NAV = [
+  { id: 'schedule', label: 'Horario', icon: Calendar },
+  { id: 'chat', label: 'Chat', icon: MessageCircle },
+  { id: 'music', label: 'Música', icon: Music2 },
+  { id: 'memories', label: 'Recuerdos', icon: Camera },
 ];
 
 interface MainHubProps {
@@ -45,10 +52,12 @@ export default function MainHub({ onSelectModule, userName, onToggleFullscreen, 
         <InstitutionalLogo className="w-14 h-14" onClick={onToggleFullscreen} />
       </div>
 
-      <header className="max-w-7xl mx-auto mb-16 flex flex-col md:flex-row justify-between items-start md:items-end gap-6 pt-20 md:pt-0">
+      <header className="max-w-7xl mx-auto mb-16 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 pt-20 md:pt-0">
+        {/* Left: Brand + Top Nav */}
         <div>
-          <div className="flex items-center gap-4 mb-4">
-            <div 
+          {/* Brand */}
+          <div className="flex items-center gap-4 mb-5">
+            <div
               className="flex flex-col cursor-pointer hover:scale-105 active:scale-95 transition-transform"
               onClick={onLogout}
               title="Cerrar sesión"
@@ -56,7 +65,25 @@ export default function MainHub({ onSelectModule, userName, onToggleFullscreen, 
               <span className="font-serif italic text-lg tracking-tight leading-none text-white font-bold">LOS HÉROES</span>
               <span className="font-serif italic text-xs tracking-[0.3em] text-vortex-accent">DE ÑUBLE</span>
             </div>
+
+            {/* ── TOP NAV BUTTONS ── */}
+            <div className="flex items-center gap-1 ml-4">
+              {TOP_NAV.map((item, i) => (
+                <motion.button
+                  key={item.id}
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                  onClick={() => onSelectModule(item.id)}
+                  className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-vortex-accent/40 hover:bg-vortex-accent/5 text-slate-400 hover:text-white transition-all"
+                >
+                  <item.icon className="w-3.5 h-3.5 group-hover:text-vortex-accent transition-colors" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest hidden sm:inline">{item.label}</span>
+                </motion.button>
+              ))}
+            </div>
           </div>
+
           <h1 className="text-4xl font-serif italic text-white mb-2">Sistema Central de Operaciones</h1>
           <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px]">
             Bienvenido, <span className="text-vortex-accent">{userName}</span> // Acceso Autorizado

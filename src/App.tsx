@@ -3,12 +3,16 @@ import LoginGate from './components/LoginGate';
 import Dashboard from './components/Dashboard';
 import ModuleAcademic from './components/ModuleAcademic';
 import ModulePhysical from './components/ModulePhysical';
+import ModuleSchedule from './components/ModuleSchedule';
+import ModuleChat from './components/ModuleChat';
+import ModuleMusic from './components/ModuleMusic';
+import ModuleMemories from './components/ModuleMemories';
 import MainHub from './components/MainHub';
 import InstitutionalLogo from './components/InstitutionalLogo';
 import { motion, AnimatePresence } from 'motion/react';
 import { VORTEX_PROFILES } from './data/profiles';
 import { UserProfile } from './types';
-import { ChevronLeft, Grid, Maximize, Minimize, Focus } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 export default function App() {
@@ -262,6 +266,14 @@ export default function App() {
         );
       case 'physical':
         return <ModulePhysical profile={connectedProfile} updateProfile={updateProfile} />;
+      case 'schedule':
+        return <ModuleSchedule />;
+      case 'chat':
+        return <ModuleChat currentUser={connectedProfile} />;
+      case 'music':
+        return <ModuleMusic />;
+      case 'memories':
+        return <ModuleMemories />;
       default:
         return (
           <div className="flex flex-col items-center justify-center h-[calc(100vh-12rem)] text-slate-700 py-20 border border-slate-800 rounded opacity-50">
