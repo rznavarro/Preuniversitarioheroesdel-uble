@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ChangeEvent, type FormEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type ChangeEvent, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { VORTEX_PROFILES } from '../data/profiles';
@@ -9,7 +9,7 @@ interface Message {
   id: string;
   from_code: string;
   from_name: string;
-  to_code: string | null; // null = broadcast (grupo)
+  to_code: string | null;
   text: string | null;
   image_url: string | null;
   created_at: string;
@@ -20,33 +20,6 @@ interface ModuleChatProps {
 }
 
 const ALL_USERS = Object.values(VORTEX_PROFILES).filter(p => p.code !== 'VX-13');
-const LOCAL_CHAT_KEY = 'vortex_chat_messages_v1';
-
-function readLocalMessages(): Message[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_CHAT_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Message[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
-  const map = new Map<string, Message>();
-  [...existing, ...incoming].forEach((msg) => {
-    const safeId = msg.id || `${msg.from_code}-${msg.to_code ?? 'group'}-${msg.created_at}`;
-    map.set(safeId, { ...msg, id: safeId });
-  });
-  return Array.from(map.values()).sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
-}
-
-function saveLocalMessages(messages: Message[]) {
-  localStorage.setItem(LOCAL_CHAT_KEY, JSON.stringify(messages));
-}
 
 function getInitials(name: string) {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
@@ -84,7 +57,17 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
-  // Load messages when contact changes
+  const isRelevantMessage = useCallback((msg: Message): boolean => {
+    if (!selectedContact) return false;
+    if (selectedContact === 'group') return msg.to_code === null;
+    const contactCode = selectedContact.code;
+    return (
+      (msg.from_code === currentUser.code && msg.to_code === contactCode) ||
+      (msg.from_code === contactCode && msg.to_code === currentUser.code)
+    );
+  }, [selectedContact, currentUser.code]);
+
+  // Load messages from Supabase when contact changes
   useEffect(() => {
     if (!selectedContact) return;
     setLoadingMsgs(true);
@@ -96,10 +79,10 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
         const incoming = payload.new as Message;
         if (!isRelevantMessage(incoming)) return;
         setMessages(prev => {
-          const next = mergeMessages(prev, [incoming]);
-          const allLocal = mergeMessages(readLocalMessages(), [incoming]);
-          saveLocalMessages(allLocal);
-          return next;
+          if (prev.some(m => m.id === incoming.id)) return prev;
+          return [...prev, incoming].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
         });
       })
       .subscribe();
@@ -107,28 +90,15 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedContact, currentUser.code]);
+  }, [selectedContact, currentUser.code, isRelevantMessage]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  function isRelevantMessage(msg: Message): boolean {
-    if (!selectedContact) return false;
-    if (selectedContact === 'group') return msg.to_code === null;
-    const contactCode = selectedContact.code;
-    return (
-      (msg.from_code === currentUser.code && msg.to_code === contactCode) ||
-      (msg.from_code === contactCode && msg.to_code === currentUser.code)
-    );
-  }
-
   async function loadMessages() {
     try {
       setChatError(null);
-      const localAll = readLocalMessages();
-      const localRelevant = localAll.filter(isRelevantMessage);
-      setMessages(localRelevant);
 
       let query = supabase.from('chat_messages').select('*').order('created_at', { ascending: true });
 
@@ -141,15 +111,12 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
         );
       }
 
-      const { data, error } = await query.limit(200);
+      const { data, error } = await query.limit(500);
       if (error) throw error;
-      const remote = (data as Message[]) ?? [];
-      const mergedAll = mergeMessages(localAll, remote);
-      saveLocalMessages(mergedAll);
-      setMessages(mergedAll.filter(isRelevantMessage));
+      setMessages((data as Message[]) ?? []);
     } catch (err) {
       console.error('Error loading messages:', err);
-      setChatError('Sin conexión al chat en línea. Mostrando historial guardado localmente.');
+      setChatError('Error al cargar mensajes. Verifica tu conexión.');
     } finally {
       setLoadingMsgs(false);
     }
@@ -173,7 +140,6 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
     let image_url: string | null = null;
 
     try {
-      // Mantener imagen en base64 para no depender de storage adicional.
       if (imageFile) {
         image_url = imagePreview;
       }
@@ -189,12 +155,14 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
 
       if (error) throw error;
 
-      // Inserción optimista controlada para reflejar instantáneamente y persistir local.
       if (data) {
         const inserted = data as Message;
-        const allLocal = mergeMessages(readLocalMessages(), [inserted]);
-        saveLocalMessages(allLocal);
-        setMessages(prev => mergeMessages(prev, [inserted]));
+        setMessages(prev => {
+          if (prev.some(m => m.id === inserted.id)) return prev;
+          return [...prev, inserted].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+        });
       }
 
       setText('');
@@ -203,30 +171,12 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       console.error('Error sending message:', err);
-      const toCode = selectedContact === 'group' ? null : (selectedContact as UserProfile)?.code ?? null;
-      const localMessage: Message = {
-        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        from_code: currentUser.code,
-        from_name: currentUser.name,
-        to_code: toCode,
-        text: text.trim() || null,
-        image_url,
-        created_at: new Date().toISOString(),
-      };
-      const allLocal = mergeMessages(readLocalMessages(), [localMessage]);
-      saveLocalMessages(allLocal);
-      setMessages(prev => mergeMessages(prev, [localMessage]));
-      setText('');
-      setImageFile(null);
-      setImagePreview(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      setChatError('No se pudo enviar en línea. Mensaje guardado localmente.');
+      setChatError('No se pudo enviar el mensaje. Intenta de nuevo.');
     } finally {
       setSending(false);
     }
   }
 
-  // Group messages by date
   function groupByDate(msgs: Message[]) {
     const groups: { date: string; messages: Message[] }[] = [];
     let currentDate = '';
@@ -357,7 +307,7 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
                       <span className="text-[10px] text-slate-600 font-mono uppercase tracking-widest capitalize">{group.date}</span>
                       <div className="flex-1 h-px bg-slate-800" />
                     </div>
-                    {group.messages.map((msg, idx) => {
+                    {group.messages.map((msg) => {
                       const isMe = msg.from_code === currentUser.code;
                       return (
                         <AnimatePresence key={msg.id}>
