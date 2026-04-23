@@ -48,8 +48,7 @@ export default function ModulePhysical({ profile, updateProfile }: ModulePhysica
       id: Math.random().toString(36).substr(2, 9),
       date: new Date(manualEntry.date + 'T12:00:00').toLocaleDateString('es-CL'),
       time: formattedTime,
-      type: manualEntry.distance,
-      score: (Math.random() * (7 - 4) + 4).toFixed(1) // Simulado
+      type: manualEntry.distance
     };
 
     updateProfile({
@@ -206,10 +205,6 @@ export default function ModulePhysical({ profile, updateProfile }: ModulePhysica
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-[8px] text-slate-600 uppercase font-mono mb-1">Nota</p>
-                        <p className="text-xl font-serif italic text-vortex-accent">{record.score}</p>
-                      </div>
                       <button 
                         onClick={() => handleDeleteRecord(record.id)}
                         className="p-2 text-slate-800 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
@@ -232,19 +227,19 @@ export default function ModulePhysical({ profile, updateProfile }: ModulePhysica
           <div className="vortex-card p-8 border-vortex-accent/10 bg-vortex-accent/5">
             <h3 className="text-[10px] font-bold text-white uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-vortex-accent shadow-[0_0_8px_rgba(245,158,11,0.5)]"></span>
-              Límite Operativo
+              Referencia de Usuario
             </h3>
             <p className="text-xs text-slate-400 font-light leading-relaxed mb-8 italic">
-              Institución Destino: <span className="text-slate-100">{institutionMap[profile.targetInstitution]}</span>. Marca recomendada para nota máxima (7.0).
+              Institución destino: <span className="text-slate-100">{institutionMap[profile.targetInstitution]}</span>. Registra tu marca real y mejora progresivamente.
             </p>
             <div className="flex items-end justify-between border-t border-slate-800/50 pt-6">
               <div className="text-left">
-                <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">Marca Actual</p>
-                <p className="text-2xl font-serif italic text-white">09:42</p>
+                <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">Registro Libre</p>
+                <p className="text-2xl font-serif italic text-white">Sin límite fijo</p>
               </div>
               <div className="text-right">
-                <p className="text-[9px] text-vortex-accent uppercase tracking-widest mb-2 underline underline-offset-4 decoration-vortex-accent/30">Meta 7.0</p>
-                <p className="text-2xl font-serif italic text-vortex-accent">{profile.physicalGoals.run2400m}</p>
+                <p className="text-[9px] text-vortex-accent uppercase tracking-widest mb-2 underline underline-offset-4 decoration-vortex-accent/30">Mejora Continua</p>
+                <p className="text-2xl font-serif italic text-vortex-accent">Siempre se puede mejorar</p>
               </div>
             </div>
           </div>

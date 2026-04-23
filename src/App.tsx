@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import LoginGate from './components/LoginGate';
 import Dashboard from './components/Dashboard';
 import ModuleAcademic from './components/ModuleAcademic';
@@ -15,11 +15,20 @@ import { UserProfile } from './types';
 import { ChevronLeft } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
+const MUSIC_PLAYLIST = [
+  { title: 'The Weeknd - What You Need', src: '/audio/the-weeknd-what-you-need.mp3' },
+  { title: 'Survivor - Eye Of The Tiger Lyrics', src: '/audio/survivor-eye-of-the-tiger.mp3' },
+  { title: 'Linkin Park - What Ive Done Lyrics', src: '/audio/linkin-park-what-ive-done.mp3' },
+];
+
 export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState('hub');
   const [isInitializing, setIsInitializing] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [currentSongIndex, setCurrentSongIndex] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [globalData, setGlobalData] = useState<{ guides: any[], notes: any[] }>(() => {
     const saved = localStorage.getItem('vortex_global_data');
     return saved ? JSON.parse(saved) : { guides: [], notes: [] };
@@ -65,6 +74,31 @@ export default function App() {
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.muted = false;
+    audio.volume = 1;
+    audio.src = MUSIC_PLAYLIST[currentSongIndex].src;
+    audio.load();
+    if (isMusicPlaying) {
+      audio.play().catch((err) => console.error('Error reproduciendo audio:', err));
+    }
+  }, [currentSongIndex]);
+
+  const toggleMusicPlayback = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isMusicPlaying) {
+      audio.pause();
+      setIsMusicPlaying(false);
+    } else {
+      audio.play()
+        .then(() => setIsMusicPlaying(true))
+        .catch((err) => console.error('Error reproduciendo audio:', err));
+    }
+  };
 
   const addGlobalGuide = async (guide: any) => {
     try {
@@ -271,7 +305,15 @@ export default function App() {
       case 'chat':
         return <ModuleChat currentUser={connectedProfile} />;
       case 'music':
-        return <ModuleMusic />;
+        return (
+          <ModuleMusic
+            isPlaying={isMusicPlaying}
+            songs={MUSIC_PLAYLIST}
+            currentSongIndex={currentSongIndex}
+            onTogglePlayback={toggleMusicPlayback}
+            onSelectSong={setCurrentSongIndex}
+          />
+        );
       case 'memories':
         return <ModuleMemories />;
       default:
@@ -287,6 +329,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-vortex-dark">
+      <audio ref={audioRef} preload="metadata" onPlay={() => setIsMusicPlaying(true)} onPause={() => setIsMusicPlaying(false)} />
       {/* Sidebar is now conditional or hidden in isolated mode */}
       {/* For this specific request, we won't show the sidebar at all if we are in a module, 
           instead we show a "Back to Menu" button to keep it isolated. */}

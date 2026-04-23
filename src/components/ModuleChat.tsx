@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { VORTEX_PROFILES } from '../data/profiles';
@@ -20,6 +20,33 @@ interface ModuleChatProps {
 }
 
 const ALL_USERS = Object.values(VORTEX_PROFILES).filter(p => p.code !== 'VX-13');
+const LOCAL_CHAT_KEY = 'vortex_chat_messages_v1';
+
+function readLocalMessages(): Message[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_CHAT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Message[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
+  const map = new Map<string, Message>();
+  [...existing, ...incoming].forEach((msg) => {
+    const safeId = msg.id || `${msg.from_code}-${msg.to_code ?? 'group'}-${msg.created_at}`;
+    map.set(safeId, { ...msg, id: safeId });
+  });
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+}
+
+function saveLocalMessages(messages: Message[]) {
+  localStorage.setItem(LOCAL_CHAT_KEY, JSON.stringify(messages));
+}
 
 function getInitials(name: string) {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
@@ -55,6 +82,7 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // Load messages when contact changes
   useEffect(() => {
@@ -62,19 +90,24 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
     setLoadingMsgs(true);
     loadMessages();
 
-    // Real-time subscription
     const channel = supabase
-      .channel('chat_realtime')
+      .channel(`chat_realtime_${currentUser.code}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
-        const msg = payload.new as Message;
-        if (isRelevantMessage(msg)) {
-          setMessages(prev => [...prev, msg]);
-        }
+        const incoming = payload.new as Message;
+        if (!isRelevantMessage(incoming)) return;
+        setMessages(prev => {
+          const next = mergeMessages(prev, [incoming]);
+          const allLocal = mergeMessages(readLocalMessages(), [incoming]);
+          saveLocalMessages(allLocal);
+          return next;
+        });
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedContact]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedContact, currentUser.code]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -92,6 +125,11 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
 
   async function loadMessages() {
     try {
+      setChatError(null);
+      const localAll = readLocalMessages();
+      const localRelevant = localAll.filter(isRelevantMessage);
+      setMessages(localRelevant);
+
       let query = supabase.from('chat_messages').select('*').order('created_at', { ascending: true });
 
       if (selectedContact === 'group') {
@@ -103,16 +141,21 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
         );
       }
 
-      const { data, error } = await query.limit(100);
-      if (!error && data) setMessages(data as Message[]);
+      const { data, error } = await query.limit(200);
+      if (error) throw error;
+      const remote = (data as Message[]) ?? [];
+      const mergedAll = mergeMessages(localAll, remote);
+      saveLocalMessages(mergedAll);
+      setMessages(mergedAll.filter(isRelevantMessage));
     } catch (err) {
       console.error('Error loading messages:', err);
+      setChatError('Sin conexión al chat en línea. Mostrando historial guardado localmente.');
     } finally {
       setLoadingMsgs(false);
     }
   }
 
-  function handleImageSelect(e: Event & { target: HTMLInputElement }) {
+  function handleImageSelect(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setImageFile(file);
@@ -121,48 +164,63 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
     reader.readAsDataURL(file);
   }
 
-  async function handleSend(e: SubmitEvent) {
+  async function handleSend(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if ((!text.trim() && !imageFile) || sending) return;
 
     setSending(true);
+    setChatError(null);
     let image_url: string | null = null;
 
     try {
-      // Upload image if present
+      // Mantener imagen en base64 para no depender de storage adicional.
       if (imageFile) {
-        const fileName = `chat/${Date.now()}_${imageFile.name}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('chat-images')
-          .upload(fileName, imageFile, { contentType: imageFile.type });
-
-        if (!uploadError && uploadData) {
-          const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(fileName);
-          image_url = urlData.publicUrl;
-        } else {
-          // Fallback: store as base64 in message
-          image_url = imagePreview;
-        }
+        image_url = imagePreview;
       }
 
       const toCode = selectedContact === 'group' ? null : (selectedContact as UserProfile)?.code ?? null;
-
-      const { error } = await supabase.from('chat_messages').insert([{
+      const { data, error } = await supabase.from('chat_messages').insert([{
         from_code: currentUser.code,
         from_name: currentUser.name,
         to_code: toCode,
         text: text.trim() || null,
         image_url,
-      }]);
+      }]).select().single();
 
-      if (!error) {
-        setText('');
-        setImageFile(null);
-        setImagePreview(null);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+      if (error) throw error;
+
+      // Inserción optimista controlada para reflejar instantáneamente y persistir local.
+      if (data) {
+        const inserted = data as Message;
+        const allLocal = mergeMessages(readLocalMessages(), [inserted]);
+        saveLocalMessages(allLocal);
+        setMessages(prev => mergeMessages(prev, [inserted]));
       }
+
+      setText('');
+      setImageFile(null);
+      setImagePreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       console.error('Error sending message:', err);
+      const toCode = selectedContact === 'group' ? null : (selectedContact as UserProfile)?.code ?? null;
+      const localMessage: Message = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        from_code: currentUser.code,
+        from_name: currentUser.name,
+        to_code: toCode,
+        text: text.trim() || null,
+        image_url,
+        created_at: new Date().toISOString(),
+      };
+      const allLocal = mergeMessages(readLocalMessages(), [localMessage]);
+      saveLocalMessages(allLocal);
+      setMessages(prev => mergeMessages(prev, [localMessage]));
+      setText('');
+      setImageFile(null);
+      setImagePreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setChatError('No se pudo enviar en línea. Mensaje guardado localmente.');
     } finally {
       setSending(false);
     }
@@ -276,6 +334,11 @@ export default function ModuleChat({ currentUser }: ModuleChatProps) {
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-1">
+              {chatError && (
+                <div className="mb-3 rounded-lg border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-[11px] text-amber-200 font-mono">
+                  {chatError}
+                </div>
+              )}
               {loadingMsgs ? (
                 <div className="flex items-center justify-center h-full">
                   <div className="w-6 h-6 border-2 border-vortex-accent border-t-transparent rounded-full animate-spin" />
